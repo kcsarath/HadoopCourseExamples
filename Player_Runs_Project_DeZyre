@@ -1,0 +1,101 @@
+1. Create flume spool Directory:  (assuming thet files will be received to this location )
+mkdir /home/cloudera/runs
+
+2. Create HDFS Directory: (To move files from location in step2)
+
+hadoop fs -mkdir /user/cloudera/runs/
+
+3. Create file runs-flume-conf.properties using:
+
+
+# example.conf: A single-node Flume configuration
+
+# Name the components on this agent
+agent.sources = src-1
+agent.sinks = hdfs-sink
+agent.channels = memory-channel
+
+#Source properties, its a spolling source which will take data from directory /var/log/apache/runs
+agent.sources.src-1.type = spooldir
+agent.sources.src-1.spoolDir = /home/cloudera/runs
+agent.sources.src-1.fileHeader = true
+
+# Use a channel which buffers events in memory
+agent.channels.memory-channel.type = memory
+agent.channels.memory-channel.capacity = 1000
+agent.channels.memory-channel.transactionCapacity = 100
+
+#Sink properties, hdfs source which will store data here 
+agent.sinks.hdfs-sink.type = hdfs
+agent.sinks.hdfs-sink.hdfs.path = /user/cloudera/runs/
+agent.sinks.hdfs-sink.hdfs.fileType = DataStream 
+agent.sinks.hdfs-sink.hdfs.rollCount = 20
+
+
+# Bind the source and sink to the channel
+agent.sources.src-1.channels = memory-channel
+agent.sinks.hdfs-sink.channel = memory-channel
+
+4: Start the Flume Agent: 
+
+flume-ng agent -n agent -c conf -f runs-flume-conf.properties
+
+5. For testing purposes, move file runs_opposition_2000.csv to Flume Source location (Step2);
+Flume moved the file to HDFS location (step3)
+cp runs_opposition_2000.csv /home/cloudera/runs
+
+
+"
+14/08/17 08:30:41 INFO avro.ReliableSpoolingFileEventReader: Preparing to move file /home/cloudera/runs/runs_opposition_2000.csv to /home/cloudera/runs/runs_opposition_2000.csv.COMPLETED
+14/08/17 08:30:44 INFO hdfs.HDFSDataStream: Serializer = TEXT, UseRawLocalFileSystem = false
+14/08/17 08:30:44 INFO hdfs.BucketWriter: Creating /user/cloudera/runs//FlumeData.1408289444129.tmp"
+
+
+
+
+6. Create pig file (final_runs.pig) to perform both Runs_By_Player an Balls_by_Player with single script and  single set of outut:
+
+runs = LOAD '/user/cloudera/runs/' using PigStorage(',') as (Player_id:int, Year:int, Country:chararray, Opposition_Team:chararray, Runs_Scored:int, Balls_Played:int);
+player = foreach runs generate Player_id, Runs_Scored, Balls_Played;
+player_group = group player by Player_id;
+runs_scores_by_player = foreach player_group generate group, SUM(player.Runs_Scored) as Scores, SUM(player.Balls_Played) as Balls;
+dump runs_scores_by_player;
+describe runs_scores_by_player;
+
+2014-08-17 18:24:22,269 [main] INFO  org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceLauncher - Success!
+2014-08-17 18:24:22,274 [main] INFO  org.apache.pig.data.SchemaTupleBackend - Key [pig.schematuple] was not set... will not generate code.
+2014-08-17 18:24:22,284 [main] INFO  org.apache.hadoop.mapreduce.lib.input.FileInputFormat - Total input paths to process : 1
+2014-08-17 18:24:22,287 [main] INFO  org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil - Total input paths to process : 1
+(1,14118,13619)
+(2,5412,5451)
+(3,19660,20026)
+(4,8926,9795)
+(5,6420,7014)
+(6,26028,24064)
+(7,15366,16816)
+(8,13785,12961)
+(9,14975,14475)
+(10,25023,24604)
+
+--runs_scores_by_player: {group: int,Scores: long,Balls: long}
+
+
+7: Same exercise for files with Header Record
+runs = LOAD '/user/cloudera/flume/' using PigStorage(',') as (Player_id:int, Year:int, Country:chararray, Opposition_Team:chararray, Runs_Scored:int, Balls_Played:int);
+No_Header = FILTER runs BY Opposition_Team != 'Opposition_Team';
+player = foreach No_Header generate Player_id, Runs_Scored, Balls_Played;
+player_group =group player by Player_id;
+A = foreach player_group generate group, SUM(player.Runs_Scored) as Scores, SUM(player.Balls_Played) as Balls;
+B = foreach player_group generate group, SUM(player.Runs_Scored) as Scores, SUM(player.Balls_Played) as Balls;
+C = JOIN A by group, B by group;
+D = foreach C GENERATE A::group, A::Scores, A::Balls;
+dump D;
+
+2014-08-20 17:55:39,122 [main] WARN  org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceLauncher - Encountered Warning FIELD_DISCARDED_TYPE_CONVERSION_FAILED 6 time(s).
+2014-08-20 17:55:39,122 [main] INFO  org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceLauncher - Success!
+2014-08-20 17:55:39,131 [main] INFO  org.apache.pig.data.SchemaTupleBackend - Key [pig.schematuple] was not set... will not generate code.
+2014-08-20 17:55:39,146 [main] INFO  org.apache.hadoop.mapreduce.lib.input.FileInputFormat - Total input paths to process : 1
+2014-08-20 17:55:39,146 [main] INFO  org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil - Total input paths to process : 1
+(3,5820,5352)
+(6,3742,3772)
+(10,5350,4520)
